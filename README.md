@@ -68,7 +68,7 @@ mvn spring-boot:run
 
 Não versione a senha nem a chave. Guarde a chave gerada de forma segura e reutilize a mesma chave ao reiniciar: sem ela, os dados pessoais já cifrados não podem ser recuperados. Os testes de persistência verificam as migrações, as relações hotel/hóspede/estadia e a cifragem autenticada dos dados do hóspede. Os testes não substituem validação contra uma instância PostgreSQL real.
 
-Nesta etapa ainda não há endpoints para consultar ou alterar dados de hóspedes. A API de domínio virá após definir autenticação e autorização na fase de segurança.
+Os endpoints administrativos da seção abaixo existem desde a semana de 09/11, mas **ainda sem autenticação** (ela entra na etapa 3). Use-os só localmente e com dados sintéticos.
 
 ### PostgreSQL com Docker (opcional)
 
@@ -82,4 +82,27 @@ docker compose up -d
 Use a mesma senha em `DB_PASSWORD` ao iniciar a aplicação. As variáveis de ambiente estão listadas em `.env.example`.
 
 A migração `V1` foi executada em um PostgreSQL 16 real e as regras do banco foram conferidas: nome de hotel único, saída depois da chegada, chaves estrangeiras e FNRH única por hóspede e estadia.
+
+## Endpoints administrativos (CRUD)
+
+Todos usam JSON e o prefixo `/api/v1`. Cada recurso tem `POST`, `GET` (lista), `GET /{id}`, `PUT /{id}` e `DELETE /{id}`.
+
+| Recurso | Rota | Corpo para criar |
+| --- | --- | --- |
+| Hotel | `/hotels` | `{"name": "Hotel de Teste"}` |
+| Hóspede | `/guests` | `{"fullName", "cpf" (11 dígitos), "dateOfBirth", "documentType" (RG ou CNH), "documentNumber"}` |
+| Estadia | `/stays` (filtro `?hotelId=`) | `{"hotelId", "arrivalDate", "departureDate"}` |
+| FNRH | `/fnrh-registrations` | `{"stayId", "guestId"}`; `PUT` altera só o `status` (`PENDING` ou `CONFIRMED`) |
+
+Respostas de erro seguem `{"status", "error", "message", "details"}`: **400** dados inválidos, **404** não encontrado, **409** duplicado ou em uso (por exemplo, apagar um hotel que tem estadias).
+
+As respostas de hóspede nunca trazem o texto cifrado e mostram CPF e número do documento mascarados.
+
+Exemplo no PowerShell, com a aplicação rodando:
+
+```powershell
+Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/v1/hotels `
+  -ContentType "application/json" -Body '{"name":"Hotel de Teste"}'
+Invoke-RestMethod http://localhost:8080/api/v1/hotels
+```
 
