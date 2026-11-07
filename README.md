@@ -69,3 +69,17 @@ mvn spring-boot:run
 Não versione a senha nem a chave. Guarde a chave gerada de forma segura e reutilize a mesma chave ao reiniciar: sem ela, os dados pessoais já cifrados não podem ser recuperados. Os testes de persistência verificam as migrações, as relações hotel/hóspede/estadia e a cifragem autenticada dos dados do hóspede. Os testes não substituem validação contra uma instância PostgreSQL real.
 
 Nesta etapa ainda não há endpoints para consultar ou alterar dados de hóspedes. A API de domínio virá após definir autenticação e autorização na fase de segurança.
+
+### PostgreSQL com Docker (opcional)
+
+Se você tem Docker, o arquivo `docker-compose.yml` sobe um PostgreSQL 16 já com o banco e o usuário `fast_checkin`:
+
+```powershell
+$env:DB_PASSWORD = "sua-senha-local"
+docker compose up -d
+```
+
+Use a mesma senha em `DB_PASSWORD` ao iniciar a aplicação. As variáveis de ambiente estão listadas em `.env.example`.
+
+A migração `V1` foi executada em um PostgreSQL 16 real e as regras do banco foram conferidas: nome de hotel único, saída depois da chegada, chaves estrangeiras e FNRH única por hóspede e estadia.
+

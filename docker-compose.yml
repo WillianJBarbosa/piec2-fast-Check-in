@@ -1,0 +1,25 @@
+# PostgreSQL local para desenvolvimento do Fast Check-in.
+# Uso (PowerShell):
+#   $env:DB_PASSWORD = "sua-senha-local"
+#   docker compose up -d
+# O banco e o usuário "fast_checkin" são criados na primeira execução.
+services:
+  postgres:
+    image: postgres:16
+    container_name: fast-checkin-db
+    environment:
+      POSTGRES_DB: fast_checkin
+      POSTGRES_USER: fast_checkin
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?defina a variável DB_PASSWORD antes de subir o banco}
+    ports:
+      - "5432:5432"
+    volumes:
+      - fast_checkin_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fast_checkin -d fast_checkin"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  fast_checkin_data:
