@@ -55,6 +55,13 @@ public class FnrhRegistration {
         this.status = FnrhStatus.PENDING;
     }
 
+    public void changeStatus(FnrhStatus newStatus) {
+        if (newStatus == null) {
+            throw new IllegalArgumentException("O status da FNRH é obrigatório.");
+        }
+        this.status = newStatus;
+    }
+
     public UUID getId() {
         return id;
     }

@@ -31,6 +31,13 @@ public class Hotel {
         this.name = name;
     }
 
+    public void rename(String newName) {
+        if (newName == null || newName.isBlank()) {
+            throw new IllegalArgumentException("O nome do hotel é obrigatório.");
+        }
+        this.name = newName.trim();
+    }
+
     public UUID getId() {
         return id;
     }

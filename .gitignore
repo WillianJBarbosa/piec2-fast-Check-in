@@ -5,3 +5,13 @@ target/
 .env
 .env.*
 !.env.example
+
+# Protótipos Python (OCR e facial)
+.venv/
+__pycache__/
+*.pyc
+ocr-prototipo/amostras/*
+!ocr-prototipo/amostras/.gitkeep
+facial-prototipo/amostras/*
+!facial-prototipo/amostras/.gitkeep
+facial-prototipo/pares.csv

@@ -30,6 +30,10 @@ public class Guest {
         this.personalDataCiphertext = personalDataCiphertext;
     }
 
+    public void replacePersonalDataCiphertext(String newCiphertext) {
+        this.personalDataCiphertext = newCiphertext;
+    }
+
     public UUID getId() {
         return id;
     }

@@ -54,6 +54,21 @@ public class Stay {
         this.status = StayStatus.PENDING;
     }
 
+    public void reschedule(LocalDate newArrivalDate, LocalDate newDepartureDate) {
+        if (newArrivalDate == null || newDepartureDate == null || !newDepartureDate.isAfter(newArrivalDate)) {
+            throw new IllegalArgumentException("A saída deve ocorrer depois da chegada.");
+        }
+        this.arrivalDate = newArrivalDate;
+        this.departureDate = newDepartureDate;
+    }
+
+    public void changeStatus(StayStatus newStatus) {
+        if (newStatus == null) {
+            throw new IllegalArgumentException("O status da estadia é obrigatório.");
+        }
+        this.status = newStatus;
+    }
+
     public UUID getId() {
         return id;
     }

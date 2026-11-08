@@ -1,0 +1,6 @@
+documento,selfie,esperado
+amostras/pessoa1_documento.png,amostras/pessoa1_selfie1.jpg,mesma
+amostras/pessoa1_documento.png,amostras/pessoa1_selfie2.jpg,mesma
+amostras/pessoa1_documento.png,amostras/pessoa2_selfie1.jpg,diferente
+amostras/pessoa2_documento.png,amostras/pessoa2_selfie1.jpg,mesma
+amostras/pessoa2_documento.png,amostras/pessoa1_selfie2.jpg,diferente
