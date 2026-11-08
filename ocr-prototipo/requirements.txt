@@ -1,0 +1,7 @@
+# Python 3.9 a 3.12. O EasyOCR baixa o modelo de português na primeira execução.
+easyocr
+opencv-python
+numpy
+pillow
+# Opcional (alternativa ao EasyOCR): precisa do programa Tesseract instalado.
+pytesseract
