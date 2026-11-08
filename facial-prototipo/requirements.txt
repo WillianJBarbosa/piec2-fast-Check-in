@@ -1,0 +1,5 @@
+# Python 3.9 a 3.11 recomendado (o TensorFlow acompanha o DeepFace).
+deepface
+tf-keras
+opencv-python
+numpy
