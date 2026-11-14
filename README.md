@@ -20,7 +20,7 @@ Cada etapa deve terminar com revisão e testes antes de ser commitada. As fases 
 | --- | --- | --- |
 | 1. Fundação da API | Projeto Spring Boot, endpoint de saúde versionado e teste HTTP | Validada: `mvn test` (1 teste) e endpoint respondendo `UP` |
 | 2. Domínio e persistência | Modelos de hotel, hóspede, estadia/check-in e FNRH; banco relacional e migrações | Implementada; testes com H2 passaram |
-| 3. Segurança e privacidade | Autenticação/autorização, consentimento/base legal, auditoria, retenção e proteção de dados | Planejada |
+| 3. Segurança e privacidade | Autenticação/autorização, consentimento/base legal, auditoria, retenção e proteção de dados | Em andamento: login JWT e perfis implementados (M12); LGPD planejada (M13) |
 | 4. Documentos e OCR | Recebimento controlado de RG/CNH, contrato com serviço FastAPI, OCR e revisão humana | Planejada |
 | 5. Validação facial | Prova de vida e comparação facial, condicionadas à avaliação de risco, dados apropriados e validação de desempenho | Planejada |
 | 6. Integração hoteleira | Integração REST idempotente com faturamento/gestão do hotel e tratamento de falhas | Planejada |
@@ -68,7 +68,7 @@ mvn spring-boot:run
 
 Não versione a senha nem a chave. Guarde a chave gerada de forma segura e reutilize a mesma chave ao reiniciar: sem ela, os dados pessoais já cifrados não podem ser recuperados. Os testes de persistência verificam as migrações, as relações hotel/hóspede/estadia e a cifragem autenticada dos dados do hóspede. Os testes não substituem validação contra uma instância PostgreSQL real.
 
-Os endpoints administrativos da seção abaixo existem desde a semana de 09/11, mas **ainda sem autenticação** (ela entra na etapa 3). Use-os só localmente e com dados sintéticos.
+Os endpoints administrativos exigem login (veja a seção **Autenticação e perfis**). Use-os só localmente e com dados sintéticos.
 
 ### PostgreSQL com Docker (opcional)
 
@@ -98,11 +98,50 @@ Respostas de erro seguem `{"status", "error", "message", "details"}`: **400** da
 
 As respostas de hóspede nunca trazem o texto cifrado e mostram CPF e número do documento mascarados.
 
-Exemplo no PowerShell, com a aplicação rodando:
+Exemplo no PowerShell, com a aplicação rodando e o `$headers` da seção **Autenticação e perfis**:
 
 ```powershell
-Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/v1/hotels `
+Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/v1/hotels -Headers $headers `
   -ContentType "application/json" -Body '{"name":"Hotel de Teste"}'
-Invoke-RestMethod http://localhost:8080/api/v1/hotels
+Invoke-RestMethod http://localhost:8080/api/v1/hotels -Headers $headers
 ```
+
+## Autenticação e perfis
+
+A API usa login com token JWT. Só `GET /api/v1/health` e `POST /api/v1/auth/login` são públicos: sem token a resposta é **401**, e com o perfil errado é **403**.
+
+| Perfil | Pode |
+| --- | --- |
+| `ADMIN` | tudo: hotéis, usuários, hóspedes, estadias e FNRH |
+| `RECEPCIONISTA` | consultar hotéis e operar hóspedes, estadias e FNRH; não cria hotel nem gerencia usuários |
+
+Variáveis novas (veja `.env.example`). Sem `JWT_SECRET` a aplicação **não inicia**.
+
+```powershell
+$keyBytes = New-Object byte[] 32
+$rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+$rng.GetBytes($keyBytes)
+$env:JWT_SECRET = [Convert]::ToBase64String($keyBytes)
+
+$env:ADMIN_USERNAME = "admin"
+$env:ADMIN_PASSWORD = "escolha-uma-senha-com-8-ou-mais-caracteres"
+mvn spring-boot:run
+```
+
+O `ADMIN_USERNAME` e o `ADMIN_PASSWORD` criam o primeiro administrador na inicialização, apenas quando a tabela de usuários está vazia. Depois disso, o ADMIN cadastra os demais pelo `POST /api/v1/users`. A senha é guardada como hash BCrypt e nunca aparece nas respostas nem nos logs.
+
+Entrar e usar o token:
+
+```powershell
+$login = Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/v1/auth/login `
+  -ContentType "application/json" -Body '{"username":"admin","password":"a-senha-do-admin"}'
+$headers = @{ Authorization = "Bearer $($login.accessToken)" }
+
+Invoke-RestMethod http://localhost:8080/api/v1/hotels -Headers $headers
+Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/v1/users -Headers $headers `
+  -ContentType "application/json" `
+  -Body '{"username":"recepcao","password":"senha-da-recepcao-1","role":"RECEPCIONISTA"}'
+```
+
+`DELETE /api/v1/users/{id}` desativa o usuário (ele deixa de conseguir entrar). O token vale 60 minutos (`JWT_TTL_MINUTES`). Guarde o `JWT_SECRET` com o mesmo cuidado da chave de criptografia: se ele mudar, os tokens antigos deixam de valer.
 
