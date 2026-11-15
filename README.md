@@ -21,7 +21,7 @@ Cada etapa deve terminar com revisão e testes antes de ser commitada. As fases 
 | 1. Fundação da API | Projeto Spring Boot, endpoint de saúde versionado e teste HTTP | Validada: `mvn test` (1 teste) e endpoint respondendo `UP` |
 | 2. Domínio e persistência | Modelos de hotel, hóspede, estadia/check-in e FNRH; banco relacional e migrações | Implementada; testes com H2 passaram |
 | 3. Segurança e privacidade | Autenticação/autorização, consentimento/base legal, auditoria, retenção e proteção de dados | Em andamento: login JWT e perfis (M12) e consentimento, auditoria e retenção (M13) implementados |
-| 4. Documentos e OCR | Recebimento controlado de RG/CNH, contrato com serviço FastAPI, OCR e revisão humana | Planejada |
+| 4. Documentos e OCR | Recebimento controlado de RG/CNH, contrato com serviço FastAPI, OCR e revisão humana | Em andamento: protótipo (M09) e serviço FastAPI `ocr-servico/` (M14); integração com a API Java na M15 |
 | 5. Validação facial | Prova de vida e comparação facial, condicionadas à avaliação de risco, dados apropriados e validação de desempenho | Planejada |
 | 6. Integração hoteleira | Integração REST idempotente com faturamento/gestão do hotel e tratamento de falhas | Planejada |
 | 7. Operação e qualidade | Testes ponta a ponta, observabilidade, limites de carga, implantação e endurecimento operacional | Planejada |

@@ -19,24 +19,92 @@ def carregar_imagem(caminho):
     return img
 
 
-def preparar(img, largura_alvo=1800):
-    """Aumenta, passa para cinza e melhora o contraste. Ajuda em fotos de celular."""
+def decodificar(dados):
+    """Abre uma imagem que já está na memória (bytes), sem passar pelo disco."""
+    if not dados:
+        raise ValueError("A imagem está vazia.")
+    img = cv2.imdecode(np.frombuffer(dados, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if img is None:
+        raise ValueError("Não consegui abrir a imagem: o arquivo está corrompido ou não é uma imagem aceita.")
+    return img
+
+
+def _angulo_do_texto(cinza, limite=10.0, passo=0.5):
+    """Estima a inclinação do texto, em graus, entre -limite e +limite.
+
+    Gira uma versão pequena e binária da imagem e escolhe o ângulo em que as
+    linhas de texto ficam mais "alinhadas" (maior variação entre linhas com
+    muita tinta e linhas vazias). Devolve 0 quando o ganho é pequeno, para não
+    mexer em imagens que já estão retas.
+    """
+    altura, largura = cinza.shape[:2]
+    fator = 600.0 / largura
+    pequena = cv2.resize(cinza, (600, max(1, int(altura * fator))), interpolation=cv2.INTER_AREA)
+    _, binaria = cv2.threshold(pequena, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    h, w = binaria.shape
+    centro = (w / 2, h / 2)
+
+    def pontuacao(angulo):
+        matriz = cv2.getRotationMatrix2D(centro, angulo, 1.0)
+        girada = cv2.warpAffine(binaria, matriz, (w, h), flags=cv2.INTER_NEAREST)
+        return float(np.var(girada.sum(axis=1, dtype=np.float64)))
+
+    base = pontuacao(0.0)
+    melhor_angulo, melhor = 0.0, base
+    for angulo in np.arange(-limite, limite + passo, passo):
+        nota = pontuacao(float(angulo))
+        if nota > melhor:
+            melhor_angulo, melhor = float(angulo), nota
+    if abs(melhor_angulo) < 1.0 or melhor < base * 1.05:
+        return 0.0
+    return melhor_angulo
+
+
+def endireitar(img):
+    """Corrige pequenas inclinações (até 10 graus) comuns em fotos tiradas à mão."""
+    cinza = img if img.ndim == 2 else cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    angulo = _angulo_do_texto(cinza)
+    if angulo == 0.0:
+        return img
     altura, largura = img.shape[:2]
-    if largura < largura_alvo:
+    matriz = cv2.getRotationMatrix2D((largura / 2, altura / 2), angulo, 1.0)
+    return cv2.warpAffine(img, matriz, (largura, altura), flags=cv2.INTER_CUBIC,
+                          borderMode=cv2.BORDER_REPLICATE)
+
+
+def preparar(img, largura_alvo=1800, largura_max=3200):
+    """Ajusta o tamanho, endireita, passa para cinza e melhora o contraste.
+
+    Fotos de celular grandes demais são reduzidas (menos memória e tempo); as
+    pequenas são ampliadas. Ajuda em fotos de celular.
+    """
+    altura, largura = img.shape[:2]
+    if largura > largura_max:
+        fator = largura_max / largura
+        img = cv2.resize(img, (largura_max, max(1, int(altura * fator))), interpolation=cv2.INTER_AREA)
+    elif largura < largura_alvo:
         fator = largura_alvo / largura
         img = cv2.resize(img, (int(largura * fator), int(altura * fator)), interpolation=cv2.INTER_CUBIC)
+    img = endireitar(img)
     cinza = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     cinza = cv2.fastNlMeansDenoising(cinza, None, 10, 7, 21)
     return cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(cinza)
 
 
-def _linhas_tesseract(img):
+def _pytesseract():
+    """Importa o pytesseract já apontando para TESSERACT_CMD, se estiver definida."""
     import pytesseract
 
     comando = os.environ.get("TESSERACT_CMD")
     if comando:
         pytesseract.pytesseract.tesseract_cmd = comando
-    texto = pytesseract.image_to_string(img, lang="por", config="--psm 6")
+    return pytesseract
+
+
+def _linhas_tesseract(img):
+    pytesseract = _pytesseract()
+    idioma = os.environ.get("OCR_LANG", "por")
+    texto = pytesseract.image_to_string(img, lang=idioma, config="--psm 6")
     return [l.strip() for l in texto.splitlines() if l.strip()]
 
 
@@ -72,9 +140,7 @@ def disponivel(motor):
         if motor == "easyocr":
             import easyocr  # noqa: F401
         else:
-            import pytesseract
-
-            pytesseract.get_tesseract_version()
+            _pytesseract().get_tesseract_version()
         return True
     except Exception:
         return False
@@ -86,9 +152,14 @@ def escolher_motor(motor="auto"):
     return "easyocr" if disponivel("easyocr") else "tesseract"
 
 
-def ler_linhas(caminho, motor="auto"):
-    """Devolve (linhas, motor_usado)."""
+def ler_linhas_de_imagem(img, motor="auto"):
+    """Devolve (linhas, motor_usado) a partir de uma imagem já aberta (BGR)."""
     motor = escolher_motor(motor)
-    img = preparar(carregar_imagem(caminho))
+    img = preparar(img)
     linhas = _linhas_easyocr(img) if motor == "easyocr" else _linhas_tesseract(img)
     return linhas, motor
+
+
+def ler_linhas(caminho, motor="auto"):
+    """Devolve (linhas, motor_usado)."""
+    return ler_linhas_de_imagem(carregar_imagem(caminho), motor)
