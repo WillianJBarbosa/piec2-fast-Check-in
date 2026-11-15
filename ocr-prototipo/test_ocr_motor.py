@@ -3,7 +3,9 @@
 Rode com:  python -m unittest -v
 """
 import io
+import os
 import unittest
+from unittest import mock
 
 import cv2
 import numpy as np
@@ -76,6 +78,19 @@ class PrepararTest(unittest.TestCase):
         pequena = imagem_com_linhas_de_texto(900, 560)
         pronta = ocr_motor.preparar(pequena)
         self.assertGreaterEqual(pronta.shape[1], 1800)
+
+
+class TesseractTest(unittest.TestCase):
+    def test_disponivel_respeita_tesseract_cmd(self):
+        """Com o Tesseract fora do PATH, TESSERACT_CMD precisa valer também na checagem."""
+        import pytesseract
+
+        anterior = pytesseract.pytesseract.tesseract_cmd
+        self.addCleanup(setattr, pytesseract.pytesseract, "tesseract_cmd", anterior)
+        falso = os.path.join("pasta", "que", "nao", "existe", "tesseract.exe")
+        with mock.patch.dict(os.environ, {"TESSERACT_CMD": falso}):
+            self.assertFalse(ocr_motor.disponivel("tesseract"))
+            self.assertEqual(pytesseract.pytesseract.tesseract_cmd, falso)
 
 
 if __name__ == "__main__":

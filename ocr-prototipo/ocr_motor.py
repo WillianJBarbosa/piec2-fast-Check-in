@@ -91,12 +91,18 @@ def preparar(img, largura_alvo=1800, largura_max=3200):
     return cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(cinza)
 
 
-def _linhas_tesseract(img):
+def _pytesseract():
+    """Importa o pytesseract já apontando para TESSERACT_CMD, se estiver definida."""
     import pytesseract
 
     comando = os.environ.get("TESSERACT_CMD")
     if comando:
         pytesseract.pytesseract.tesseract_cmd = comando
+    return pytesseract
+
+
+def _linhas_tesseract(img):
+    pytesseract = _pytesseract()
     idioma = os.environ.get("OCR_LANG", "por")
     texto = pytesseract.image_to_string(img, lang=idioma, config="--psm 6")
     return [l.strip() for l in texto.splitlines() if l.strip()]
@@ -134,9 +140,7 @@ def disponivel(motor):
         if motor == "easyocr":
             import easyocr  # noqa: F401
         else:
-            import pytesseract
-
-            pytesseract.get_tesseract_version()
+            _pytesseract().get_tesseract_version()
         return True
     except Exception:
         return False
