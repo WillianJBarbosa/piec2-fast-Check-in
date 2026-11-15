@@ -20,7 +20,7 @@ Cada etapa deve terminar com revisão e testes antes de ser commitada. As fases 
 | --- | --- | --- |
 | 1. Fundação da API | Projeto Spring Boot, endpoint de saúde versionado e teste HTTP | Validada: `mvn test` (1 teste) e endpoint respondendo `UP` |
 | 2. Domínio e persistência | Modelos de hotel, hóspede, estadia/check-in e FNRH; banco relacional e migrações | Implementada; testes com H2 passaram |
-| 3. Segurança e privacidade | Autenticação/autorização, consentimento/base legal, auditoria, retenção e proteção de dados | Em andamento: login JWT e perfis implementados (M12); LGPD planejada (M13) |
+| 3. Segurança e privacidade | Autenticação/autorização, consentimento/base legal, auditoria, retenção e proteção de dados | Em andamento: login JWT e perfis (M12) e consentimento, auditoria e retenção (M13) implementados |
 | 4. Documentos e OCR | Recebimento controlado de RG/CNH, contrato com serviço FastAPI, OCR e revisão humana | Planejada |
 | 5. Validação facial | Prova de vida e comparação facial, condicionadas à avaliação de risco, dados apropriados e validação de desempenho | Planejada |
 | 6. Integração hoteleira | Integração REST idempotente com faturamento/gestão do hotel e tratamento de falhas | Planejada |
@@ -90,11 +90,11 @@ Todos usam JSON e o prefixo `/api/v1`. Cada recurso tem `POST`, `GET` (lista), `
 | Recurso | Rota | Corpo para criar |
 | --- | --- | --- |
 | Hotel | `/hotels` | `{"name": "Hotel de Teste"}` |
-| Hóspede | `/guests` | `{"fullName", "cpf" (11 dígitos), "dateOfBirth", "documentType" (RG ou CNH), "documentNumber"}` |
+| Hóspede | `/guests` | `{"fullName", "cpf" (11 dígitos), "dateOfBirth", "documentType" (RG ou CNH), "documentNumber", "consentAccepted": true}` (o consentimento é obrigatório só no cadastro) |
 | Estadia | `/stays` (filtro `?hotelId=`) | `{"hotelId", "arrivalDate", "departureDate"}` |
 | FNRH | `/fnrh-registrations` | `{"stayId", "guestId"}`; `PUT` altera só o `status` (`PENDING` ou `CONFIRMED`) |
 
-Respostas de erro seguem `{"status", "error", "message", "details"}`: **400** dados inválidos, **404** não encontrado, **409** duplicado ou em uso (por exemplo, apagar um hotel que tem estadias).
+Respostas de erro seguem `{"status", "error", "message", "details"}`: **400** dados inválidos, **404** não encontrado, **409** duplicado ou em uso (por exemplo, apagar um hotel que tem estadias), **422** falta consentimento do hóspede.
 
 As respostas de hóspede nunca trazem o texto cifrado e mostram CPF e número do documento mascarados.
 
@@ -145,3 +145,23 @@ Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/v1/users -Headers 
 
 `DELETE /api/v1/users/{id}` desativa o usuário (ele deixa de conseguir entrar). O token vale 60 minutos (`JWT_TTL_MINUTES`). Guarde o `JWT_SECRET` com o mesmo cuidado da chave de criptografia: se ele mudar, os tokens antigos deixam de valer.
 
+## Privacidade (LGPD): consentimento, auditoria e retenção
+
+**Consentimento.** Cadastrar um hóspede exige `"consentAccepted": true`; sem ele a resposta é **422** e nada é gravado. O cadastro registra o consentimento de `CHECKIN_FNRH` com data e usuário. Criar uma FNRH também exige consentimento ativo (**422** caso contrário). Outros consentimentos, por finalidade (`CHECKIN_FNRH`, `BIOMETRIA_FACIAL`):
+
+| Ação | Rota |
+| --- | --- |
+| Conceder | `POST /api/v1/guests/{id}/consents` com `{"purpose": "BIOMETRIA_FACIAL"}` |
+| Listar (com histórico) | `GET /api/v1/guests/{id}/consents` |
+| Revogar | `DELETE /api/v1/guests/{id}/consents/BIOMETRIA_FACIAL` |
+
+Revogar não apaga a linha: guarda a data da revogação como prova.
+
+**Auditoria.** Toda leitura, criação, alteração e remoção de dados de hóspede, e toda concessão e revogação de consentimento, gera um registro com quem, o quê, qual hóspede e quando. O registro guarda só identificadores, nunca dados pessoais, e é gravado em transação própria: se a gravação falhar, a operação não entrega o dado. Consulta, só para ADMIN: `GET /api/v1/audit?guestId=<id>&limit=100`.
+
+**Retenção.** Passado o prazo (`RETENTION_DAYS`, padrão 1825) desde o cadastro e sem estadia recente, o hóspede é anonimizado: os dados pessoais são apagados de forma irreversível, os consentimentos são revogados e o evento `ANONYMIZE` entra na auditoria. A rotina roda todo dia às 3h (`RETENTION_CRON`) e o ADMIN pode disparar com `POST /api/v1/privacy/retention/run`. O prazo padrão é só um ponto de partida do projeto: o valor real deve vir da política do hotel e de orientação jurídica.
+
+```powershell
+Invoke-RestMethod http://localhost:8080/api/v1/audit -Headers $headers
+Invoke-RestMethod -Method Post http://localhost:8080/api/v1/privacy/retention/run -Headers $headers
+```
