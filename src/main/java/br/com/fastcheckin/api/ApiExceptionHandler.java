@@ -1,6 +1,7 @@
 package br.com.fastcheckin.api;
 
 import br.com.fastcheckin.common.ResourceNotFoundException;
+import br.com.fastcheckin.domain.consent.ConsentRequiredException;
 import br.com.fastcheckin.security.InvalidCredentialsException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -26,6 +27,11 @@ public class ApiExceptionHandler {
     @ExceptionHandler(ResourceNotFoundException.class)
     public ResponseEntity<ApiError> handleNotFound(ResourceNotFoundException exception) {
         return build(HttpStatus.NOT_FOUND, exception.getMessage(), List.of());
+    }
+
+    @ExceptionHandler(ConsentRequiredException.class)
+    public ResponseEntity<ApiError> handleConsentRequired(ConsentRequiredException exception) {
+        return build(HttpStatus.UNPROCESSABLE_ENTITY, exception.getMessage(), List.of());
     }
 
     @ExceptionHandler(InvalidCredentialsException.class)

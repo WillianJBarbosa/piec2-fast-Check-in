@@ -1,6 +1,10 @@
 package br.com.fastcheckin.domain.guest;
 
 import br.com.fastcheckin.common.ResourceNotFoundException;
+import br.com.fastcheckin.domain.audit.AuditAction;
+import br.com.fastcheckin.domain.audit.AuditService;
+import br.com.fastcheckin.domain.consent.ConsentPurpose;
+import br.com.fastcheckin.domain.consent.ConsentService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
@@ -15,35 +19,56 @@ public class GuestService {
     private final GuestRepository guestRepository;
     private final PersonalDataCipher personalDataCipher;
     private final ObjectMapper objectMapper;
+    private final AuditService auditService;
+    private final ConsentService consentService;
 
     public GuestService(
             GuestRepository guestRepository,
             PersonalDataCipher personalDataCipher,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            AuditService auditService,
+            ConsentService consentService
     ) {
         this.guestRepository = guestRepository;
         this.personalDataCipher = personalDataCipher;
         this.objectMapper = objectMapper;
+        this.auditService = auditService;
+        this.consentService = consentService;
     }
 
+    /**
+     * Cadastra o hóspede e registra o consentimento de CHECKIN_FNRH na mesma
+     * transação. Quem chama garante que o hóspede consentiu (a API exige
+     * {@code consentAccepted = true}).
+     */
     @Transactional
     public Guest register(GuestPersonalData personalData) {
-        return guestRepository.save(new Guest(encrypt(personalData)));
+        Guest guest = guestRepository.save(new Guest(encrypt(personalData)));
+        audit(AuditAction.CREATE, guest.getId());
+        consentService.grant(guest.getId(), ConsentPurpose.CHECKIN_FNRH);
+        return guest;
     }
 
+    /** Toda leitura de dados pessoais gera um registro de auditoria. */
     @Transactional(readOnly = true)
     public GuestPersonalData getPersonalData(UUID guestId) {
-        return decrypt(findGuest(guestId));
+        GuestPersonalData personalData = decrypt(findGuest(guestId));
+        audit(AuditAction.READ, guestId);
+        return personalData;
     }
 
     @Transactional(readOnly = true)
     public GuestView get(UUID guestId) {
-        return toView(findGuest(guestId));
+        GuestView view = toView(findGuest(guestId));
+        audit(AuditAction.READ, guestId);
+        return view;
     }
 
     @Transactional(readOnly = true)
     public List<GuestView> list() {
-        return guestRepository.findAll().stream().map(this::toView).toList();
+        List<GuestView> views = guestRepository.findByAnonymizedAtIsNull().stream().map(this::toView).toList();
+        views.forEach(view -> audit(AuditAction.READ, view.id()));
+        return views;
     }
 
     @Transactional
@@ -51,6 +76,7 @@ public class GuestService {
         Guest guest = findGuest(guestId);
         guest.replacePersonalDataCiphertext(encrypt(personalData));
         guestRepository.flush();
+        audit(AuditAction.UPDATE, guestId);
         return toView(guest);
     }
 
@@ -59,11 +85,20 @@ public class GuestService {
         Guest guest = findGuest(guestId);
         guestRepository.delete(guest);
         guestRepository.flush();
+        audit(AuditAction.DELETE, guestId);
+    }
+
+    private void audit(AuditAction action, UUID guestId) {
+        auditService.record(action, AuditService.GUEST, guestId);
     }
 
     private Guest findGuest(UUID guestId) {
-        return guestRepository.findById(guestId)
+        Guest guest = guestRepository.findById(guestId)
                 .orElseThrow(() -> new ResourceNotFoundException("Hóspede não encontrado."));
+        if (guest.isAnonymized()) {
+            throw new ResourceNotFoundException("Os dados deste hóspede foram removidos por prazo de retenção.");
+        }
+        return guest;
     }
 
     private GuestView toView(Guest guest) {

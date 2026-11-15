@@ -1,5 +1,6 @@
 package br.com.fastcheckin.api;
 
+import br.com.fastcheckin.domain.consent.ConsentRequiredException;
 import br.com.fastcheckin.domain.guest.DocumentType;
 import br.com.fastcheckin.domain.guest.GuestPersonalData;
 import br.com.fastcheckin.domain.guest.GuestService;
@@ -29,8 +30,8 @@ import java.util.UUID;
 
 /**
  * Rotas administrativas de hóspedes. As respostas nunca trazem o texto cifrado
- * nem CPF e documento completos: ficam mascarados. A autenticação desta rota
- * entra na meta de segurança (M10).
+ * nem CPF e documento completos: ficam mascarados. Exige login (ADMIN ou
+ * RECEPCIONISTA); cadastro exige o consentimento do hóspede.
  */
 @RestController
 @RequestMapping("/api/v1/guests")
@@ -56,7 +57,8 @@ public class GuestController {
             DocumentType documentType,
             @NotBlank(message = "o número do documento é obrigatório")
             @Size(max = 30, message = "o número do documento deve ter no máximo 30 caracteres")
-            String documentNumber
+            String documentNumber,
+            Boolean consentAccepted
     ) {
 
         GuestPersonalData toPersonalData() {
@@ -105,6 +107,11 @@ public class GuestController {
 
     @PostMapping
     public ResponseEntity<GuestResponse> create(@Valid @RequestBody GuestRequest request) {
+        if (!Boolean.TRUE.equals(request.consentAccepted())) {
+            throw new ConsentRequiredException(
+                    "O consentimento do hóspede é obrigatório para cadastrar os dados (consentAccepted = true)."
+            );
+        }
         UUID id = guestService.register(request.toPersonalData()).getId();
         URI location = ServletUriComponentsBuilder.fromCurrentRequest()
                 .path("/{id}")
