@@ -1,0 +1,6 @@
+# Python 3.9 a 3.12 (o mesmo do protótipo de OCR).
+-r ../ocr-prototipo/requirements.txt
+fastapi
+uvicorn
+# Só para os testes da API (fastapi.testclient):
+httpx
