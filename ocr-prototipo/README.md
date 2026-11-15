@@ -12,6 +12,8 @@ CNH antiga, CNH nova, RG de cada estado e a Carteira de Identidade Nacional (CIN
 - valida os dígitos do CPF;
 - qualquer campo ausente, inferido ou com CPF inválido faz o resultado sair com `"precisa_revisao": true`, para o recepcionista conferir.
 
+**Pré-processamento (M14).** Antes do OCR a imagem é reduzida se passar de 3200 px de largura (menos memória), ampliada se tiver menos de 1800 px, **endireitada** quando o texto está inclinado até 10 graus, passa para cinza, tira ruído e ganha contraste. Em um teste com 3 documentos fictícios girados em -9, -6, 6 e 9 graus (12 imagens, 48 campos, Tesseract), o resultado foi 35/48 sem endireitar e 48/48 com o endireitamento. Nas 10 imagens padrão continuou 40/40.
+
 Limitações conhecidas: o número do documento na CIN é o CPF quando não há RG impresso; documentos girados em 90 graus, muito escuros ou com reflexo não são tratados; nenhum modelo real foi testado ainda.
 
 ## Instalação (PowerShell)
@@ -35,7 +37,7 @@ python ler_documento.py amostras\cnh_nova_limpo.png
 python ler_documento.py amostras\rg_b_foto.jpg --texto     # mostra também o texto lido
 python ler_documento.py amostras\cin_limpo.png --formato api   # corpo do POST /api/v1/guests
 python avaliar_ocr.py                           # tabela de acertos por imagem
-python -m unittest -v                           # testes do extrator
+python -m unittest -v                           # testes do extrator e do pré-processamento
 ```
 
 Para colar uma foto sua nos documentos fictícios (e usar na comparação facial, M10): `python gerar_documentos_ficticios.py --foto minha_selfie.jpg`.
