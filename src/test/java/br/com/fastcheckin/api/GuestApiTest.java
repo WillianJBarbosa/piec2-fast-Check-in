@@ -31,7 +31,7 @@ class GuestApiTest {
 
     private static final String VALID_BODY = """
             {"fullName":"Pessoa de Teste","cpf":"12345678901","dateOfBirth":"1990-04-12",
-             "documentType":"CNH","documentNumber":"TESTE-123"}""";
+             "documentType":"CNH","documentNumber":"TESTE-123","consentAccepted":true}""";
 
     @Autowired
     private MockMvc mockMvc;

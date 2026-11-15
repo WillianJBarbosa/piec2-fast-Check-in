@@ -1,6 +1,8 @@
 package br.com.fastcheckin.domain.fnrh;
 
 import br.com.fastcheckin.common.ResourceNotFoundException;
+import br.com.fastcheckin.domain.consent.ConsentPurpose;
+import br.com.fastcheckin.domain.consent.ConsentService;
 import br.com.fastcheckin.domain.guest.Guest;
 import br.com.fastcheckin.domain.guest.GuestRepository;
 import br.com.fastcheckin.domain.stay.Stay;
@@ -17,15 +19,18 @@ public class FnrhRegistrationService {
     private final FnrhRegistrationRepository fnrhRegistrationRepository;
     private final StayRepository stayRepository;
     private final GuestRepository guestRepository;
+    private final ConsentService consentService;
 
     public FnrhRegistrationService(
             FnrhRegistrationRepository fnrhRegistrationRepository,
             StayRepository stayRepository,
-            GuestRepository guestRepository
+            GuestRepository guestRepository,
+            ConsentService consentService
     ) {
         this.fnrhRegistrationRepository = fnrhRegistrationRepository;
         this.stayRepository = stayRepository;
         this.guestRepository = guestRepository;
+        this.consentService = consentService;
     }
 
     @Transactional
@@ -34,6 +39,7 @@ public class FnrhRegistrationService {
                 .orElseThrow(() -> new ResourceNotFoundException("Estadia não encontrada."));
         Guest guest = guestRepository.findById(guestId)
                 .orElseThrow(() -> new ResourceNotFoundException("Hóspede não encontrado."));
+        consentService.requireActive(guestId, ConsentPurpose.CHECKIN_FNRH);
         return fnrhRegistrationRepository.saveAndFlush(new FnrhRegistration(stay, guest));
     }
 

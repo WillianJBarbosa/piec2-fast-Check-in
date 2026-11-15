@@ -3,6 +3,8 @@ package br.com.fastcheckin.domain.guest;
 import br.com.fastcheckin.common.ResourceNotFoundException;
 import br.com.fastcheckin.domain.audit.AuditAction;
 import br.com.fastcheckin.domain.audit.AuditService;
+import br.com.fastcheckin.domain.consent.ConsentPurpose;
+import br.com.fastcheckin.domain.consent.ConsentService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.stereotype.Service;
@@ -18,23 +20,32 @@ public class GuestService {
     private final PersonalDataCipher personalDataCipher;
     private final ObjectMapper objectMapper;
     private final AuditService auditService;
+    private final ConsentService consentService;
 
     public GuestService(
             GuestRepository guestRepository,
             PersonalDataCipher personalDataCipher,
             ObjectMapper objectMapper,
-            AuditService auditService
+            AuditService auditService,
+            ConsentService consentService
     ) {
         this.guestRepository = guestRepository;
         this.personalDataCipher = personalDataCipher;
         this.objectMapper = objectMapper;
         this.auditService = auditService;
+        this.consentService = consentService;
     }
 
+    /**
+     * Cadastra o hóspede e registra o consentimento de CHECKIN_FNRH na mesma
+     * transação. Quem chama garante que o hóspede consentiu (a API exige
+     * {@code consentAccepted = true}).
+     */
     @Transactional
     public Guest register(GuestPersonalData personalData) {
         Guest guest = guestRepository.save(new Guest(encrypt(personalData)));
         audit(AuditAction.CREATE, guest.getId());
+        consentService.grant(guest.getId(), ConsentPurpose.CHECKIN_FNRH);
         return guest;
     }
 
