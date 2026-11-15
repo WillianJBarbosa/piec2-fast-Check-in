@@ -68,8 +68,22 @@ public class ConsentService {
         }
     }
 
+    /** Revoga todos os consentimentos ativos (usado na anonimização por retenção). */
+    @Transactional
+    public void revokeAll(UUID guestId) {
+        List<Consent> active = consentRepository.findByGuestIdAndRevokedAtIsNull(guestId);
+        Instant now = Instant.now();
+        active.forEach(consent -> {
+            consent.revoke(now);
+            auditService.record(AuditAction.CONSENT_REVOKED, AuditService.GUEST, guestId);
+        });
+    }
+
     private void requireGuest(UUID guestId) {
-        if (!guestRepository.existsById(guestId)) {
+        boolean usable = guestRepository.findById(guestId)
+                .map(guest -> !guest.isAnonymized())
+                .orElse(false);
+        if (!usable) {
             throw new ResourceNotFoundException("Hóspede não encontrado.");
         }
     }

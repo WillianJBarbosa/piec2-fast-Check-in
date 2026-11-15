@@ -66,7 +66,7 @@ public class GuestService {
 
     @Transactional(readOnly = true)
     public List<GuestView> list() {
-        List<GuestView> views = guestRepository.findAll().stream().map(this::toView).toList();
+        List<GuestView> views = guestRepository.findByAnonymizedAtIsNull().stream().map(this::toView).toList();
         views.forEach(view -> audit(AuditAction.READ, view.id()));
         return views;
     }
@@ -93,8 +93,12 @@ public class GuestService {
     }
 
     private Guest findGuest(UUID guestId) {
-        return guestRepository.findById(guestId)
+        Guest guest = guestRepository.findById(guestId)
                 .orElseThrow(() -> new ResourceNotFoundException("Hóspede não encontrado."));
+        if (guest.isAnonymized()) {
+            throw new ResourceNotFoundException("Os dados deste hóspede foram removidos por prazo de retenção.");
+        }
+        return guest;
     }
 
     private GuestView toView(Guest guest) {
