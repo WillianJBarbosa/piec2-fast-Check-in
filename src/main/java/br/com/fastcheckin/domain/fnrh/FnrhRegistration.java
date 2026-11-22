@@ -43,6 +43,9 @@ public class FnrhRegistration {
     @Column(nullable = false, length = 30)
     private FnrhStatus status;
 
+    @Column(name = "review_required", nullable = false)
+    private boolean reviewRequired;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -50,9 +53,15 @@ public class FnrhRegistration {
     }
 
     public FnrhRegistration(Stay stay, Guest guest) {
+        this(stay, guest, false);
+    }
+
+    /** @param reviewRequired true quando o OCR deixou dúvida e o recepcionista precisa conferir os campos */
+    public FnrhRegistration(Stay stay, Guest guest, boolean reviewRequired) {
         this.stay = stay;
         this.guest = guest;
         this.status = FnrhStatus.PENDING;
+        this.reviewRequired = reviewRequired;
     }
 
     public void changeStatus(FnrhStatus newStatus) {
@@ -60,6 +69,10 @@ public class FnrhRegistration {
             throw new IllegalArgumentException("O status da FNRH é obrigatório.");
         }
         this.status = newStatus;
+        if (newStatus == FnrhStatus.CONFIRMED) {
+            // a confirmação é a conferência humana: limpa a marca de revisão
+            this.reviewRequired = false;
+        }
     }
 
     public UUID getId() {
@@ -76,6 +89,10 @@ public class FnrhRegistration {
 
     public FnrhStatus getStatus() {
         return status;
+    }
+
+    public boolean isReviewRequired() {
+        return reviewRequired;
     }
 
     public Instant getCreatedAt() {

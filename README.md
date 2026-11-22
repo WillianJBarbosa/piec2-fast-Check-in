@@ -21,7 +21,7 @@ Cada etapa deve terminar com revisão e testes antes de ser commitada. As fases 
 | 1. Fundação da API | Projeto Spring Boot, endpoint de saúde versionado e teste HTTP | Validada: `mvn test` (1 teste) e endpoint respondendo `UP` |
 | 2. Domínio e persistência | Modelos de hotel, hóspede, estadia/check-in e FNRH; banco relacional e migrações | Implementada; testes com H2 passaram |
 | 3. Segurança e privacidade | Autenticação/autorização, consentimento/base legal, auditoria, retenção e proteção de dados | Em andamento: login JWT e perfis (M12) e consentimento, auditoria e retenção (M13) implementados |
-| 4. Documentos e OCR | Recebimento controlado de RG/CNH, contrato com serviço FastAPI, OCR e revisão humana | Em andamento: protótipo (M09) e serviço FastAPI `ocr-servico/` (M14); integração com a API Java na M15 |
+| 4. Documentos e OCR | Recebimento controlado de RG/CNH, contrato com serviço FastAPI, OCR e revisão humana | Em andamento: protótipo (M09), serviço FastAPI `ocr-servico/` (M14) e integração com a API Java com revisão humana (M15) |
 | 5. Validação facial | Prova de vida e comparação facial, condicionadas à avaliação de risco, dados apropriados e validação de desempenho | Planejada |
 | 6. Integração hoteleira | Integração REST idempotente com faturamento/gestão do hotel e tratamento de falhas | Planejada |
 | 7. Operação e qualidade | Testes ponta a ponta, observabilidade, limites de carga, implantação e endurecimento operacional | Planejada |
@@ -92,7 +92,7 @@ Todos usam JSON e o prefixo `/api/v1`. Cada recurso tem `POST`, `GET` (lista), `
 | Hotel | `/hotels` | `{"name": "Hotel de Teste"}` |
 | Hóspede | `/guests` | `{"fullName", "cpf" (11 dígitos), "dateOfBirth", "documentType" (RG ou CNH), "documentNumber", "consentAccepted": true}` (o consentimento é obrigatório só no cadastro) |
 | Estadia | `/stays` (filtro `?hotelId=`) | `{"hotelId", "arrivalDate", "departureDate"}` |
-| FNRH | `/fnrh-registrations` | `{"stayId", "guestId"}`; `PUT` altera só o `status` (`PENDING` ou `CONFIRMED`) |
+| FNRH | `/fnrh-registrations` | `{"stayId", "guestId"}`; `PUT` altera só o `status` (`PENDING` ou `CONFIRMED`); `POST /{id}/confirm` confirma depois da conferência; `POST /from-document` cria a partir da foto (veja abaixo) |
 
 Respostas de erro seguem `{"status", "error", "message", "details"}`: **400** dados inválidos, **404** não encontrado, **409** duplicado ou em uso (por exemplo, apagar um hotel que tem estadias), **422** falta consentimento do hóspede.
 
@@ -165,3 +165,49 @@ Revogar não apaga a linha: guarda a data da revogação como prova.
 Invoke-RestMethod http://localhost:8080/api/v1/audit -Headers $headers
 Invoke-RestMethod -Method Post http://localhost:8080/api/v1/privacy/retention/run -Headers $headers
 ```
+
+## Check-in pela foto do documento (M15)
+
+A API chama o serviço de OCR (`ocr-servico/`, M14) e cria o hóspede e a FNRH **pendente**, para o recepcionista conferir antes de confirmar. A decisão final é sempre humana.
+
+`POST /api/v1/fnrh-registrations/from-document?stayId=<id>&consentAccepted=true`: o corpo são os **bytes da imagem** (`Content-Type: image/jpeg`, `image/png`, `image/webp` ou `image/bmp`), sem multipart, para nada ir para o disco. Funciona para ADMIN e RECEPCIONISTA.
+
+1. **Consentimento primeiro.** Sem `consentAccepted=true` a resposta é **422** e a imagem nem é enviada ao OCR.
+2. A API envia a imagem ao serviço (`OCR_URL`, `OCR_API_KEY`), lê o resultado e valida os cinco campos (nome, CPF com 11 dígitos, data de nascimento no passado, tipo e número do documento).
+3. Se o OCR não leu algum campo, a resposta é **422 `DOCUMENTO_INCOMPLETO`** com os campos que faltaram, e **nada é gravado**. Fotografe de novo ou cadastre o hóspede manualmente em `POST /api/v1/guests`.
+4. Com os cinco campos, a API cria o hóspede (com o consentimento `CHECKIN_FNRH`) e a FNRH `PENDING` na mesma transação. A resposta (**201**) traz `fnrh`, os dados lidos completos em `extracted` (para conferir com o documento), `reviewRequired` e `reviewReasons`. `reviewRequired: true` quer dizer que o OCR ficou em dúvida (campo inferido ou CPF inválido).
+5. O recepcionista corrige o que estiver errado com `PUT /api/v1/guests/{id}` e confirma com `POST /api/v1/fnrh-registrations/{id}/confirm`, que muda o status para `CONFIRMED` e limpa o `reviewRequired`.
+
+A criação e a confirmação entram na auditoria (recurso `FNRH`). A imagem fica só na memória durante a chamada: não é gravada nem registrada em log.
+
+**Falhas do serviço de OCR**, sempre com `details: ["codigo: ..."]` e sem dado pessoal:
+
+| Situação | Status | Código |
+| --- | --- | --- |
+| Foto sem texto legível, corrompida ou vazia | 422 | `TEXTO_NAO_ENCONTRADO`, `IMAGEM_ILEGIVEL`, `IMAGEM_VAZIA` |
+| Imagem grande demais (`OCR_MAX_IMAGE_BYTES`, padrão 8 MB) | 413 | `IMAGEM_GRANDE_DEMAIS` |
+| Corpo que não é imagem | 415 | `FORMATO_NAO_SUPORTADO` |
+| Serviço fora do ar ou ocupado | 503 | `OCR_INDISPONIVEL`, `OCR_OCUPADO` |
+| Serviço demorou mais que `OCR_TIMEOUT_SECONDS` (padrão 30) | 504 | `OCR_DEMOROU` |
+| Chave errada ou resposta inesperada do serviço | 502 | `OCR_NAO_AUTORIZADO`, `OCR_ERRO`, `OCR_RESPOSTA_INVALIDA` |
+
+Configuração (veja `.env.example`): `OCR_URL` (padrão `http://127.0.0.1:8001`), `OCR_API_KEY` (a mesma do serviço), `OCR_ENGINE` (`auto`, `tesseract` ou `easyocr`).
+
+```powershell
+# Terminal 1: serviço de OCR, com a mesma chave
+cd ocr-servico
+$env:OCR_API_KEY = "sua-chave"
+.\.venv\Scripts\python.exe -m uvicorn app:app --host 127.0.0.1 --port 8001
+
+# Terminal 2: API (OCR_API_KEY igual à do serviço)
+$env:OCR_API_KEY = "sua-chave"
+mvn spring-boot:run
+
+# Terminal 3: use SÓ documentos fictícios (veja ocr-prototipo/gerar_documentos_ficticios.py)
+$uri = "http://localhost:8080/api/v1/fnrh-registrations/from-document?stayId=$stayId&consentAccepted=true"
+$r = Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -ContentType "image/png" -InFile "ocr-prototipo\amostras\cnh_nova_limpo.png"
+$r.extracted; $r.reviewRequired
+Invoke-RestMethod -Method Post -Uri "http://localhost:8080/api/v1/fnrh-registrations/$($r.fnrh.id)/confirm" -Headers $headers
+```
+
+Limitação: se o mesmo hóspede for lido duas vezes para a mesma estadia, são criados dois cadastros (a API não procura duplicados porque o CPF fica cifrado). Os testes automáticos simulam o serviço de OCR; o teste com o serviço de verdade é o passo manual acima.

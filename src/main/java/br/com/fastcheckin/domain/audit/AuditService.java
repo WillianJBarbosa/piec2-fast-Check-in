@@ -13,6 +13,7 @@ import java.util.UUID;
 public class AuditService {
 
     public static final String GUEST = "GUEST";
+    public static final String FNRH = "FNRH";
 
     private static final int MAX_LIMIT = 500;
 

@@ -2,6 +2,7 @@ package br.com.fastcheckin.api;
 
 import br.com.fastcheckin.common.ResourceNotFoundException;
 import br.com.fastcheckin.domain.consent.ConsentRequiredException;
+import br.com.fastcheckin.domain.ocr.OcrException;
 import br.com.fastcheckin.security.InvalidCredentialsException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -12,6 +13,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -32,6 +34,14 @@ public class ApiExceptionHandler {
     @ExceptionHandler(ConsentRequiredException.class)
     public ResponseEntity<ApiError> handleConsentRequired(ConsentRequiredException exception) {
         return build(HttpStatus.UNPROCESSABLE_ENTITY, exception.getMessage(), List.of());
+    }
+
+    @ExceptionHandler(OcrException.class)
+    public ResponseEntity<ApiError> handleOcr(OcrException exception) {
+        List<String> details = new ArrayList<>();
+        details.add("codigo: " + exception.getCode());
+        details.addAll(exception.getDetails());
+        return build(HttpStatus.valueOf(exception.getStatus()), exception.getMessage(), details);
     }
 
     @ExceptionHandler(InvalidCredentialsException.class)
