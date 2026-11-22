@@ -1,6 +1,6 @@
 # Serviço OCR (M14)
 
-API em FastAPI que recebe a foto de uma CNH, RG ou CIN e devolve nome, CPF, data de nascimento e número do documento em JSON. Reaproveita o OCR e o extrator de `../ocr-prototipo` (uma única cópia do código). A ligação com a API Java é a M15.
+API em FastAPI que recebe a foto de uma CNH, RG ou CIN e devolve nome, CPF, data de nascimento e número do documento em JSON. Reaproveita o OCR e o extrator de `../ocr-prototipo` (uma única cópia do código). A API Java chama este serviço desde a M15 (veja o README da raiz, seção "Check-in pela foto do documento").
 
 ## Instalação (PowerShell)
 
