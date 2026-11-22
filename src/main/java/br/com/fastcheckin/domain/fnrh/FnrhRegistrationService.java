@@ -1,10 +1,14 @@
 package br.com.fastcheckin.domain.fnrh;
 
 import br.com.fastcheckin.common.ResourceNotFoundException;
+import br.com.fastcheckin.domain.audit.AuditAction;
+import br.com.fastcheckin.domain.audit.AuditService;
 import br.com.fastcheckin.domain.consent.ConsentPurpose;
 import br.com.fastcheckin.domain.consent.ConsentService;
 import br.com.fastcheckin.domain.guest.Guest;
+import br.com.fastcheckin.domain.guest.GuestPersonalData;
 import br.com.fastcheckin.domain.guest.GuestRepository;
+import br.com.fastcheckin.domain.guest.GuestService;
 import br.com.fastcheckin.domain.stay.Stay;
 import br.com.fastcheckin.domain.stay.StayRepository;
 import org.springframework.stereotype.Service;
@@ -20,17 +24,23 @@ public class FnrhRegistrationService {
     private final StayRepository stayRepository;
     private final GuestRepository guestRepository;
     private final ConsentService consentService;
+    private final GuestService guestService;
+    private final AuditService auditService;
 
     public FnrhRegistrationService(
             FnrhRegistrationRepository fnrhRegistrationRepository,
             StayRepository stayRepository,
             GuestRepository guestRepository,
-            ConsentService consentService
+            ConsentService consentService,
+            GuestService guestService,
+            AuditService auditService
     ) {
         this.fnrhRegistrationRepository = fnrhRegistrationRepository;
         this.stayRepository = stayRepository;
         this.guestRepository = guestRepository;
         this.consentService = consentService;
+        this.guestService = guestService;
+        this.auditService = auditService;
     }
 
     @Transactional
@@ -41,6 +51,30 @@ public class FnrhRegistrationService {
                 .orElseThrow(() -> new ResourceNotFoundException("Hóspede não encontrado."));
         consentService.requireActive(guestId, ConsentPurpose.CHECKIN_FNRH);
         return fnrhRegistrationRepository.saveAndFlush(new FnrhRegistration(stay, guest));
+    }
+
+    /**
+     * Cadastra o hóspede lido do documento (com o consentimento de CHECKIN_FNRH)
+     * e cria a FNRH pendente na mesma transação: ou grava tudo, ou nada. A
+     * leitura do OCR acontece antes, fora de transação.
+     */
+    @Transactional
+    public FnrhRegistration registerFromDocument(UUID stayId, GuestPersonalData personalData, boolean reviewRequired) {
+        Stay stay = stayRepository.findById(stayId)
+                .orElseThrow(() -> new ResourceNotFoundException("Estadia não encontrada."));
+        Guest guest = guestService.register(personalData);
+        FnrhRegistration registration = fnrhRegistrationRepository.saveAndFlush(
+                new FnrhRegistration(stay, guest, reviewRequired));
+        auditService.record(AuditAction.CREATE, AuditService.FNRH, registration.getId());
+        return registration;
+    }
+
+    /** Confirmação feita pelo recepcionista depois de conferir os dados; limpa a marca de revisão. */
+    @Transactional
+    public FnrhRegistration confirm(UUID id) {
+        FnrhRegistration registration = updateStatus(id, FnrhStatus.CONFIRMED);
+        auditService.record(AuditAction.UPDATE, AuditService.FNRH, id);
+        return registration;
     }
 
     @Transactional(readOnly = true)

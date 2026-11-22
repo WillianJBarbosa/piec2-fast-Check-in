@@ -1,10 +1,17 @@
 package br.com.fastcheckin.api;
 
+import br.com.fastcheckin.domain.fnrh.FnrhDocumentService;
 import br.com.fastcheckin.domain.fnrh.FnrhRegistration;
 import br.com.fastcheckin.domain.fnrh.FnrhRegistrationService;
 import br.com.fastcheckin.domain.fnrh.FnrhStatus;
+import br.com.fastcheckin.domain.guest.DocumentType;
+import br.com.fastcheckin.domain.guest.GuestPersonalData;
+import br.com.fastcheckin.domain.ocr.OcrException;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.CacheControl;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -13,11 +20,14 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
+import java.io.IOException;
 import java.net.URI;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -26,9 +36,17 @@ import java.util.UUID;
 public class FnrhRegistrationController {
 
     private final FnrhRegistrationService fnrhRegistrationService;
+    private final FnrhDocumentService fnrhDocumentService;
+    private final int maxImageBytes;
 
-    public FnrhRegistrationController(FnrhRegistrationService fnrhRegistrationService) {
+    public FnrhRegistrationController(
+            FnrhRegistrationService fnrhRegistrationService,
+            FnrhDocumentService fnrhDocumentService,
+            @Value("${app.ocr.max-image-bytes:8388608}") int maxImageBytes
+    ) {
         this.fnrhRegistrationService = fnrhRegistrationService;
+        this.fnrhDocumentService = fnrhDocumentService;
+        this.maxImageBytes = maxImageBytes;
     }
 
     public record FnrhRequest(
@@ -42,7 +60,14 @@ public class FnrhRegistrationController {
     ) {
     }
 
-    public record FnrhResponse(UUID id, UUID stayId, UUID guestId, FnrhStatus status, Instant createdAt) {
+    public record FnrhResponse(
+            UUID id,
+            UUID stayId,
+            UUID guestId,
+            FnrhStatus status,
+            boolean reviewRequired,
+            Instant createdAt
+    ) {
 
         static FnrhResponse from(FnrhRegistration registration) {
             return new FnrhResponse(
@@ -50,9 +75,33 @@ public class FnrhRegistrationController {
                     registration.getStay().getId(),
                     registration.getGuest().getId(),
                     registration.getStatus(),
+                    registration.isReviewRequired(),
                     registration.getCreatedAt()
             );
         }
+    }
+
+    /** Campos lidos do documento, completos, para o recepcionista conferir com o documento. */
+    public record ExtractedData(
+            String fullName,
+            String cpf,
+            LocalDate dateOfBirth,
+            DocumentType documentType,
+            String documentNumber
+    ) {
+
+        static ExtractedData from(GuestPersonalData data) {
+            return new ExtractedData(
+                    data.fullName(), data.cpf(), data.dateOfBirth(), data.documentType(), data.documentNumber());
+        }
+    }
+
+    public record FnrhDocumentResponse(
+            FnrhResponse fnrh,
+            ExtractedData extracted,
+            boolean reviewRequired,
+            List<String> reviewReasons
+    ) {
     }
 
     @PostMapping
@@ -63,6 +112,56 @@ public class FnrhRegistrationController {
                 .buildAndExpand(registration.getId())
                 .toUri();
         return ResponseEntity.created(location).body(FnrhResponse.from(registration));
+    }
+
+    /**
+     * Check-in pela foto do documento. O corpo são os bytes da imagem
+     * (Content-Type image/*), sem multipart, para nada ir para disco. Exige
+     * consentAccepted=true. Cria o hóspede e a FNRH pendente; o recepcionista
+     * confere e confirma em POST /{id}/confirm. A resposta traz os dados
+     * completos e não deve ser guardada em cache.
+     */
+    @PostMapping("/from-document")
+    public ResponseEntity<FnrhDocumentResponse> createFromDocument(
+            @RequestParam UUID stayId,
+            @RequestParam(defaultValue = "false") boolean consentAccepted,
+            HttpServletRequest request
+    ) throws IOException {
+        String contentType = request.getContentType();
+        if (contentType == null || !contentType.toLowerCase().startsWith("image/")) {
+            throw new OcrException(415, "FORMATO_NAO_SUPORTADO",
+                    "Envie a imagem do documento no corpo da requisição, com Content-Type image/jpeg, image/png, image/webp ou image/bmp.");
+        }
+        byte[] image = request.getInputStream().readNBytes(maxImageBytes + 1);
+        if (image.length > maxImageBytes) {
+            throw new OcrException(413, "IMAGEM_GRANDE_DEMAIS",
+                    "A imagem é maior que o limite aceito. Reduza a resolução da foto.");
+        }
+        if (image.length == 0) {
+            throw new OcrException(422, "IMAGEM_VAZIA", "A requisição não trouxe nenhuma imagem.");
+        }
+
+        FnrhDocumentService.Result result =
+                fnrhDocumentService.registerFromDocument(stayId, consentAccepted, image, contentType);
+        FnrhRegistration registration = result.registration();
+        URI location = ServletUriComponentsBuilder.fromCurrentContextPath()
+                .path("/api/v1/fnrh-registrations/{id}")
+                .buildAndExpand(registration.getId())
+                .toUri();
+        return ResponseEntity.created(location)
+                .cacheControl(CacheControl.noStore())
+                .body(new FnrhDocumentResponse(
+                        FnrhResponse.from(registration),
+                        ExtractedData.from(result.personalData()),
+                        registration.isReviewRequired(),
+                        result.reviewReasons()
+                ));
+    }
+
+    /** Confirmação do recepcionista, depois de conferir os dados com o documento. */
+    @PostMapping("/{id}/confirm")
+    public FnrhResponse confirm(@PathVariable UUID id) {
+        return FnrhResponse.from(fnrhRegistrationService.confirm(id));
     }
 
     @GetMapping
