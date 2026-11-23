@@ -1,5 +1,8 @@
 package br.com.fastcheckin.api;
 
+import br.com.fastcheckin.domain.facial.FacialException;
+import br.com.fastcheckin.domain.facial.FacialResult;
+import br.com.fastcheckin.domain.facial.FacialVerificationService;
 import br.com.fastcheckin.domain.fnrh.FnrhDocumentService;
 import br.com.fastcheckin.domain.fnrh.FnrhRegistration;
 import br.com.fastcheckin.domain.fnrh.FnrhRegistrationService;
@@ -9,6 +12,7 @@ import br.com.fastcheckin.domain.guest.GuestPersonalData;
 import br.com.fastcheckin.domain.ocr.OcrException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.CacheControl;
@@ -28,6 +32,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
 
@@ -37,16 +42,22 @@ public class FnrhRegistrationController {
 
     private final FnrhRegistrationService fnrhRegistrationService;
     private final FnrhDocumentService fnrhDocumentService;
+    private final FacialVerificationService facialVerificationService;
     private final int maxImageBytes;
+    private final int maxFacialImageBytes;
 
     public FnrhRegistrationController(
             FnrhRegistrationService fnrhRegistrationService,
             FnrhDocumentService fnrhDocumentService,
-            @Value("${app.ocr.max-image-bytes:8388608}") int maxImageBytes
+            FacialVerificationService facialVerificationService,
+            @Value("${app.ocr.max-image-bytes:8388608}") int maxImageBytes,
+            @Value("${app.facial.max-image-bytes:8388608}") int maxFacialImageBytes
     ) {
         this.fnrhRegistrationService = fnrhRegistrationService;
         this.fnrhDocumentService = fnrhDocumentService;
+        this.facialVerificationService = facialVerificationService;
         this.maxImageBytes = maxImageBytes;
+        this.maxFacialImageBytes = maxFacialImageBytes;
     }
 
     public record FnrhRequest(
@@ -66,6 +77,8 @@ public class FnrhRegistrationController {
             UUID guestId,
             FnrhStatus status,
             boolean reviewRequired,
+            FacialResult facialResult,
+            boolean facialConfirmedManually,
             Instant createdAt
     ) {
 
@@ -76,6 +89,8 @@ public class FnrhRegistrationController {
                     registration.getGuest().getId(),
                     registration.getStatus(),
                     registration.isReviewRequired(),
+                    registration.getFacialResult(),
+                    registration.isFacialConfirmedManually(),
                     registration.getCreatedAt()
             );
         }
@@ -101,6 +116,23 @@ public class FnrhRegistrationController {
             ExtractedData extracted,
             boolean reviewRequired,
             List<String> reviewReasons
+    ) {
+    }
+
+    /** As duas imagens em Base64 (JPEG, PNG, WEBP ou BMP). Não é multipart, para nada ir para o disco. */
+    public record FacialCheckRequest(
+            @NotBlank(message = "a foto do documento é obrigatória") String documentImage,
+            @NotBlank(message = "a selfie é obrigatória") String selfieImage
+    ) {
+    }
+
+    public record FacialCheckResponse(
+            UUID fnrhId,
+            FacialResult result,
+            Double ratio,
+            String reason,
+            boolean needsReview,
+            boolean confirmedManually
     ) {
     }
 
@@ -156,6 +188,63 @@ public class FnrhRegistrationController {
                         registration.isReviewRequired(),
                         result.reviewReasons()
                 ));
+    }
+
+    /**
+     * Compara o rosto da foto do documento com o da selfie (serviço facial).
+     * Exige o consentimento BIOMETRIA_FACIAL do hóspede. Devolve compativel,
+     * revisar ou diferente: o sistema nunca barra o hóspede sozinho, e o
+     * recepcionista segue com POST /{id}/face-check/confirm depois de conferir.
+     * Só o resultado é gravado; as imagens ficam na memória e a resposta não
+     * deve ser guardada em cache.
+     */
+    @PostMapping("/{id}/face-check")
+    public ResponseEntity<FacialCheckResponse> faceCheck(
+            @PathVariable UUID id,
+            @Valid @RequestBody FacialCheckRequest request
+    ) {
+        byte[] document = decodeImage("documentImage", request.documentImage());
+        byte[] selfie = decodeImage("selfieImage", request.selfieImage());
+
+        FacialVerificationService.Result result = facialVerificationService.verify(id, document, selfie);
+        return ResponseEntity.ok()
+                .cacheControl(CacheControl.noStore())
+                .body(new FacialCheckResponse(
+                        result.registration().getId(),
+                        result.comparison().result(),
+                        result.comparison().ratio(),
+                        result.comparison().reason(),
+                        result.comparison().needsReview(),
+                        result.registration().isFacialConfirmedManually()
+                ));
+    }
+
+    /** O recepcionista conferiu o hóspede pessoalmente e segue (exige uma comparação feita antes). */
+    @PostMapping("/{id}/face-check/confirm")
+    public FnrhResponse confirmFaceCheck(@PathVariable UUID id) {
+        return FnrhResponse.from(fnrhRegistrationService.confirmFacialManually(id));
+    }
+
+    private byte[] decodeImage(String field, String base64) {
+        // Recusa antes de decodificar: o Base64 tem cerca de 4/3 do tamanho original.
+        if (base64.length() > (maxFacialImageBytes * 4L) / 3 + 8) {
+            throw new FacialException(413, "IMAGEM_GRANDE_DEMAIS",
+                    "A imagem '" + field + "' é maior que o limite aceito. Reduza a resolução da foto.");
+        }
+        byte[] bytes;
+        try {
+            bytes = Base64.getDecoder().decode(base64.trim());
+        } catch (IllegalArgumentException exception) {
+            throw new FacialException(422, "IMAGEM_INVALIDA", "A imagem '" + field + "' não está em Base64 válido.");
+        }
+        if (bytes.length == 0) {
+            throw new FacialException(422, "IMAGEM_VAZIA", "A imagem '" + field + "' está vazia.");
+        }
+        if (bytes.length > maxFacialImageBytes) {
+            throw new FacialException(413, "IMAGEM_GRANDE_DEMAIS",
+                    "A imagem '" + field + "' é maior que o limite aceito. Reduza a resolução da foto.");
+        }
+        return bytes;
     }
 
     /** Confirmação do recepcionista, depois de conferir os dados com o documento. */
