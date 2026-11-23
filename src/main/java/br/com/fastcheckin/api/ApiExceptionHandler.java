@@ -2,6 +2,7 @@ package br.com.fastcheckin.api;
 
 import br.com.fastcheckin.common.ResourceNotFoundException;
 import br.com.fastcheckin.domain.consent.ConsentRequiredException;
+import br.com.fastcheckin.domain.facial.FacialException;
 import br.com.fastcheckin.domain.ocr.OcrException;
 import br.com.fastcheckin.security.InvalidCredentialsException;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -42,6 +43,12 @@ public class ApiExceptionHandler {
         details.add("codigo: " + exception.getCode());
         details.addAll(exception.getDetails());
         return build(HttpStatus.valueOf(exception.getStatus()), exception.getMessage(), details);
+    }
+
+    @ExceptionHandler(FacialException.class)
+    public ResponseEntity<ApiError> handleFacial(FacialException exception) {
+        return build(HttpStatus.valueOf(exception.getStatus()), exception.getMessage(),
+                List.of("codigo: " + exception.getCode()));
     }
 
     @ExceptionHandler(InvalidCredentialsException.class)

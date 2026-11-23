@@ -1,5 +1,6 @@
 package br.com.fastcheckin.domain.fnrh;
 
+import br.com.fastcheckin.domain.facial.FacialResult;
 import br.com.fastcheckin.domain.guest.Guest;
 import br.com.fastcheckin.domain.stay.Stay;
 import jakarta.persistence.Column;
@@ -46,6 +47,18 @@ public class FnrhRegistration {
     @Column(name = "review_required", nullable = false)
     private boolean reviewRequired;
 
+    /** Resultado da última comparação facial; nulo enquanto nenhuma foi feita. Não guarda imagem nem vetor facial. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "facial_result", length = 20)
+    private FacialResult facialResult;
+
+    @Column(name = "facial_checked_at")
+    private Instant facialCheckedAt;
+
+    /** O recepcionista conferiu a identidade pessoalmente, mesmo sem a comparação ser "compativel". */
+    @Column(name = "facial_confirmed_manually", nullable = false)
+    private boolean facialConfirmedManually;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -75,6 +88,24 @@ public class FnrhRegistration {
         }
     }
 
+    /** Registra uma nova comparação; uma confirmação manual anterior deixa de valer. */
+    public void recordFacialCheck(FacialResult result) {
+        if (result == null) {
+            throw new IllegalArgumentException("O resultado da comparação facial é obrigatório.");
+        }
+        this.facialResult = result;
+        this.facialCheckedAt = Instant.now();
+        this.facialConfirmedManually = false;
+    }
+
+    public boolean hasFacialCheck() {
+        return facialResult != null;
+    }
+
+    public void confirmFacialManually() {
+        this.facialConfirmedManually = true;
+    }
+
     public UUID getId() {
         return id;
     }
@@ -93,6 +124,18 @@ public class FnrhRegistration {
 
     public boolean isReviewRequired() {
         return reviewRequired;
+    }
+
+    public FacialResult getFacialResult() {
+        return facialResult;
+    }
+
+    public Instant getFacialCheckedAt() {
+        return facialCheckedAt;
+    }
+
+    public boolean isFacialConfirmedManually() {
+        return facialConfirmedManually;
     }
 
     public Instant getCreatedAt() {

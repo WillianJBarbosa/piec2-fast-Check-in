@@ -5,6 +5,8 @@ import br.com.fastcheckin.domain.audit.AuditAction;
 import br.com.fastcheckin.domain.audit.AuditService;
 import br.com.fastcheckin.domain.consent.ConsentPurpose;
 import br.com.fastcheckin.domain.consent.ConsentService;
+import br.com.fastcheckin.domain.facial.FacialException;
+import br.com.fastcheckin.domain.facial.FacialResult;
 import br.com.fastcheckin.domain.guest.Guest;
 import br.com.fastcheckin.domain.guest.GuestPersonalData;
 import br.com.fastcheckin.domain.guest.GuestRepository;
@@ -73,6 +75,34 @@ public class FnrhRegistrationService {
     @Transactional
     public FnrhRegistration confirm(UUID id) {
         FnrhRegistration registration = updateStatus(id, FnrhStatus.CONFIRMED);
+        auditService.record(AuditAction.UPDATE, AuditService.FNRH, id);
+        return registration;
+    }
+
+    /** Grava o resultado da comparação facial (só o resultado, nunca as imagens) e audita. */
+    @Transactional
+    public FnrhRegistration recordFacialResult(UUID id, FacialResult result) {
+        FnrhRegistration registration = get(id);
+        registration.recordFacialCheck(result);
+        fnrhRegistrationRepository.flush();
+        auditService.record(AuditAction.UPDATE, AuditService.FNRH, id);
+        return registration;
+    }
+
+    /**
+     * O recepcionista confere o hóspede pessoalmente e segue, mesmo quando a
+     * comparação deu "revisar" ou "diferente": o sistema nunca barra sozinho.
+     * Exige que a comparação tenha sido feita antes.
+     */
+    @Transactional
+    public FnrhRegistration confirmFacialManually(UUID id) {
+        FnrhRegistration registration = get(id);
+        if (!registration.hasFacialCheck()) {
+            throw new FacialException(409, "VERIFICACAO_FACIAL_PENDENTE",
+                    "A comparação facial ainda não foi feita para esta FNRH.");
+        }
+        registration.confirmFacialManually();
+        fnrhRegistrationRepository.flush();
         auditService.record(AuditAction.UPDATE, AuditService.FNRH, id);
         return registration;
     }
