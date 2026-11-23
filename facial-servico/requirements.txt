@@ -1,0 +1,8 @@
+# Python 3.9 a 3.11 (o mesmo do protótipo facial, por causa do TensorFlow/DeepFace).
+-r ../facial-prototipo/requirements.txt
+# Usado para conferir o tamanho em pixels da imagem antes de decodificá-la.
+pillow
+fastapi
+uvicorn
+# Só para os testes da API (fastapi.testclient):
+httpx

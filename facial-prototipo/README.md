@@ -1,6 +1,6 @@
 # Protótipo facial: comparar rosto com a foto do documento (M10)
 
-Compara o rosto da foto de um documento com o de uma selfie e responde **compativel**, **revisar** ou **diferente**. É um protótipo local, ainda sem ligação com a API Java (isso é a M17).
+Compara o rosto da foto de um documento com o de uma selfie e responde **compativel**, **revisar** ou **diferente**. O protótipo roda local; a API Java usa a mesma lógica pelo serviço `../facial-servico` (M17).
 
 ## Como decide
 

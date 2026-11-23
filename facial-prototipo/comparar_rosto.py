@@ -22,10 +22,16 @@ class RostoNaoDetectado(Exception):
         self.onde = onde
 
 
-def _carregar(caminho):
-    img = cv2.imdecode(np.fromfile(caminho, dtype=np.uint8), cv2.IMREAD_COLOR)
+def _carregar(origem):
+    """Abre a imagem a partir de um caminho ou dos próprios bytes (usado pelo facial-servico, sem passar por disco)."""
+    if isinstance(origem, (bytes, bytearray)):
+        img = cv2.imdecode(np.frombuffer(origem, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if img is None:
+            raise ValueError("Não consegui abrir a imagem enviada.")
+        return img
+    img = cv2.imdecode(np.fromfile(origem, dtype=np.uint8), cv2.IMREAD_COLOR)
     if img is None:
-        raise ValueError(f"Não consegui abrir a imagem: {caminho}")
+        raise ValueError(f"Não consegui abrir a imagem: {origem}")
     return img
 
 

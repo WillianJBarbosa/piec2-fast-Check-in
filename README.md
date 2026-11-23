@@ -22,7 +22,7 @@ Cada etapa deve terminar com revisão e testes antes de ser commitada. As fases 
 | 2. Domínio e persistência | Modelos de hotel, hóspede, estadia/check-in e FNRH; banco relacional e migrações | Implementada; testes com H2 passaram |
 | 3. Segurança e privacidade | Autenticação/autorização, consentimento/base legal, auditoria, retenção e proteção de dados | Em andamento: login JWT e perfis (M12) e consentimento, auditoria e retenção (M13) implementados |
 | 4. Documentos e OCR | Recebimento controlado de RG/CNH, contrato com serviço FastAPI, OCR e revisão humana | Em andamento: protótipo (M09), serviço FastAPI `ocr-servico/` (M14) e integração com a API Java com revisão humana (M15) |
-| 5. Validação facial | Prova de vida e comparação facial, condicionadas à avaliação de risco, dados apropriados e validação de desempenho | Planejada |
+| 5. Validação facial | Prova de vida e comparação facial, condicionadas à avaliação de risco, dados apropriados e validação de desempenho | Em andamento: protótipo (M10) e serviço FastAPI `facial-servico/` integrado à API Java (M17); falta a prova de vida e o ajuste dos limites (M19) |
 | 6. Integração hoteleira | Integração REST idempotente com faturamento/gestão do hotel e tratamento de falhas | Planejada |
 | 7. Operação e qualidade | Testes ponta a ponta, observabilidade, limites de carga, implantação e endurecimento operacional | Planejada |
 | 8. Frontend | Fluxo simplificado do hóspede e painel de auditoria do recepcionista | Fora do backend atual |
@@ -211,3 +211,53 @@ Invoke-RestMethod -Method Post -Uri "http://localhost:8080/api/v1/fnrh-registrat
 ```
 
 Limitação: se o mesmo hóspede for lido duas vezes para a mesma estadia, são criados dois cadastros (a API não procura duplicados porque o CPF fica cifrado). Os testes automáticos simulam o serviço de OCR; o teste com o serviço de verdade é o passo manual acima.
+
+## Comparação facial (M17)
+
+A API chama o serviço facial (`facial-servico/`, que reaproveita o protótipo da M10) para comparar o rosto da **foto do documento** com o de uma **selfie**. O resultado é `COMPATIVEL`, `REVISAR` ou `DIFERENTE`. **O sistema nunca barra o hóspede sozinho**: só `COMPATIVEL` segue direto, e nos outros dois o recepcionista confere pessoalmente e segue. Rosto é dado biométrico (LGPD).
+
+`POST /api/v1/fnrh-registrations/{id}/face-check` com JSON `{"documentImage": "<Base64>", "selfieImage": "<Base64>"}` (JPEG, PNG, WEBP ou BMP; JSON em vez de multipart para nada ir para o disco). Funciona para ADMIN e RECEPCIONISTA. O painel (M16) e o totem (M18) reenviam a foto do documento, porque a API não guarda imagens.
+
+1. **Consentimento primeiro.** O hóspede precisa ter o consentimento `BIOMETRIA_FACIAL` ativo (`POST /api/v1/guests/{id}/consents`). Sem ele a resposta é **422** e o serviço facial nem é chamado. Revogar o consentimento impede novas comparações.
+2. A API envia as duas imagens ao serviço (`FACIAL_URL`, `FACIAL_API_KEY`) e grava **só o resultado** e a data na FNRH (`facialResult`). Nenhuma imagem nem vetor facial é gravado, e nada vai para o log.
+3. A resposta (**200**, sem cache) traz `result`, `ratio` (distância dividida pelo limiar do modelo; menor é mais parecido), `reason` (por exemplo, "rosto não detectado em selfie", caso em que não há `ratio`), `needsReview` e `confirmedManually`.
+4. Para `REVISAR` ou `DIFERENTE`, o recepcionista confere o hóspede e segue com `POST /api/v1/fnrh-registrations/{id}/face-check/confirm`, que marca `facialConfirmedManually: true`. **409** se a comparação ainda não foi feita. Uma nova comparação cancela a confirmação manual anterior.
+
+A comparação e a confirmação manual entram na auditoria (recurso `FNRH`). A confirmação facial é independente da confirmação da FNRH (`/confirm`, M15); como os dois se combinam no fluxo do hóspede é decisão da M18 (totem).
+
+**Falhas do serviço facial**, sempre com `details: ["codigo: ..."]` e sem dado pessoal:
+
+| Situação | Status | Código |
+| --- | --- | --- |
+| Imagem corrompida, vazia ou fora do Base64 | 422 | `IMAGEM_ILEGIVEL`, `IMAGEM_VAZIA`, `IMAGEM_INVALIDA` |
+| Imagem grande demais (`FACIAL_MAX_IMAGE_BYTES`, padrão 8 MB cada) | 413 | `IMAGEM_GRANDE_DEMAIS` |
+| Formato que não é imagem | 415 | `FORMATO_NAO_SUPORTADO` |
+| Comparação ainda não feita (confirmação manual) | 409 | `VERIFICACAO_FACIAL_PENDENTE` |
+| Serviço fora do ar ou ocupado | 503 | `FACIAL_INDISPONIVEL`, `FACIAL_OCUPADO` |
+| Serviço demorou mais que `FACIAL_TIMEOUT_SECONDS` (padrão 60) | 504 | `FACIAL_DEMOROU` |
+| Chave errada ou resposta inesperada do serviço | 502 | `FACIAL_NAO_AUTORIZADO`, `FACIAL_ERRO`, `FACIAL_RESPOSTA_INVALIDA` |
+
+Configuração (veja `.env.example`): `FACIAL_URL` (padrão `http://127.0.0.1:8002`), `FACIAL_API_KEY` (a mesma do serviço), `FACIAL_TIMEOUT_SECONDS`. O timeout é maior que o do OCR porque a **primeira comparação carrega o modelo** do DeepFace (e baixa os pesos, se for a primeira vez na máquina).
+
+```powershell
+# Terminal 1: serviço facial (Python 3.9 a 3.11), com a mesma chave
+cd facial-servico
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+$env:FACIAL_API_KEY = "sua-chave"
+.\.venv\Scripts\python.exe -m uvicorn app:app --host 127.0.0.1 --port 8002
+
+# Terminal 2: API (FACIAL_API_KEY igual à do serviço)
+$env:FACIAL_API_KEY = "sua-chave"
+mvn spring-boot:run
+
+# Terminal 3: use SÓ fotos suas ou de quem autorizou. $fnrhId é de uma FNRH cujo hóspede
+# tem o consentimento BIOMETRIA_FACIAL.
+$corpo = @{
+  documentImage = [Convert]::ToBase64String([IO.File]::ReadAllBytes("facial-prototipo\amostras\documento.png"))
+  selfieImage   = [Convert]::ToBase64String([IO.File]::ReadAllBytes("facial-prototipo\amostras\selfie.jpg"))
+} | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri "http://localhost:8080/api/v1/fnrh-registrations/$fnrhId/face-check" -Headers $headers -ContentType "application/json" -Body $corpo
+```
+
+Limitações: a **prova de vida** (impedir foto de foto) e o **ajuste dos limites** de decisão com mais pares são da M19; os limites atuais (85% e 115% do limiar do modelo) são um ponto de partida, e a amostra da M10 foi pequena. Os testes automáticos da API Java simulam o serviço facial; o teste com o DeepFace de verdade é o passo manual acima.
