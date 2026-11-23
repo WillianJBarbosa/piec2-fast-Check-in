@@ -1,0 +1,6 @@
+# Python 3.9 a 3.11 (o mesmo do protótipo facial, por causa do TensorFlow/DeepFace).
+-r ../facial-prototipo/requirements.txt
+fastapi
+uvicorn
+# Só para os testes da API (fastapi.testclient):
+httpx
